@@ -23,7 +23,7 @@ def fetch_data(ticker, start, end):
     return df
 
 def run_backtest(df, initial_capital, short_window, long_window):
-    """Runs the SMA Crossover backtesting strategy using a standard, clear loop."""
+    """Runs the SMA Crossover backtesting strategy using a robust NumPy-based loop."""
     print("Running backtest...")
     
     # 1. Calculate SMAs
@@ -32,49 +32,39 @@ def run_backtest(df, initial_capital, short_window, long_window):
 
     # 2. Generate Signals
     df['Signal'] = 0.0
-    # A '1' indicates a golden cross trend (short > long)
     df['Signal'] = np.where(df['Short_SMA'] > df['Long_SMA'], 1.0, 0.0)
-    
-    # 'Position' finds the exact crossover day. 1 for buy, -1 for sell.
     df['Position'] = df['Signal'].diff()
 
-    # 3. Simulate Portfolio using a clean loop
-    # Initialize portfolio columns directly on the main dataframe for simplicity
-    df['cash'] = initial_capital
-    df['holdings_value'] = 0.0
-    df['total_value'] = initial_capital
-    df['shares'] = 0.0
+    # 3. Simulate Portfolio using NumPy for speed and clarity
+    close_prices = df['Close'].to_numpy()
+    positions = df['Position'].to_numpy()
+    
+    cash = initial_capital
+    shares = 0.0
+    portfolio_history = []
 
-    # Use iloc for explicit integer-location based indexing in the loop
-    for i in range(1, len(df)):
-        # Carry forward values from the previous day (i-1) to the current day (i)
-        df.iloc[i, df.columns.get_loc('cash')] = df.iloc[i-1]['cash']
-        df.iloc[i, df.columns.get_loc('shares')] = df.iloc[i-1]['shares']
+    for i in range(len(close_prices)):
+        current_position_signal = positions[i]
+        current_price = close_prices[i]
 
-        # Check for Buy Signal: Crossover from 0 to 1, and we have cash
-        if df.iloc[i]['Position'] == 1.0 and df.iloc[i-1]['cash'] > 0:
-            shares_to_buy = df.iloc[i-1]['cash'] / df.iloc[i]['Close']
-            df.iloc[i, df.columns.get_loc('shares')] += shares_to_buy
-            df.iloc[i, df.columns.get_loc('cash')] = 0.0
+        if current_position_signal == -1.0 and shares > 0:
+            cash += shares * current_price
+            shares = 0.0
+            
+        elif current_position_signal == 1.0 and cash > 0:
+            shares_to_buy = cash / current_price
+            shares += shares_to_buy
+            cash = 0.0
 
-        # Check for Sell Signal: Crossover from 1 to 0, and we have shares
-        elif df.iloc[i]['Position'] == -1.0 and df.iloc[i-1]['shares'] > 0:
-            cash_from_sale = df.iloc[i-1]['shares'] * df.iloc[i]['Close']
-            df.iloc[i, df.columns.get_loc('cash')] += cash_from_sale
-            df.iloc[i, df.columns.get_loc('shares')] = 0.0
+        current_portfolio_value = cash + (shares * current_price)
+        portfolio_history.append(current_portfolio_value)
 
-        # Update portfolio value for the current day after any trades
-        holdings_value = df.iloc[i]['shares'] * df.iloc[i]['Close']
-        df.iloc[i, df.columns.get_loc('holdings_value')] = holdings_value
-        df.iloc[i, df.columns.get_loc('total_value')] = df.iloc[i]['cash'] + holdings_value
-
-    df['Portfolio_Total'] = df['total_value']
+    df['Portfolio_Total'] = portfolio_history
     
     # 4. Calculate Performance Metrics
-    final_value = df['total_value'].iloc[-1]
+    final_value = df['Portfolio_Total'].iloc[-1]
     total_return = (final_value / initial_capital - 1) * 100
     
-    # Benchmark: Buy and Hold
     buy_and_hold_value = initial_capital * (df['Close'].iloc[-1] / df['Close'].iloc[0])
     buy_and_hold_return = (buy_and_hold_value / initial_capital - 1) * 100
 
@@ -105,7 +95,7 @@ def plot_results(df, ticker, short_window, long_window):
     ax.grid(True)
     
     ax2 = ax.twinx()
-    ax2.plot(df['Portfolio_Total'], label='Strategy Portfolio Value', color='darkgreen', linestyle=':', alpha=0.6)
+    ax2.plot(df.index, df['Portfolio_Total'], label='Strategy Portfolio Value', color='darkgreen', linestyle=':', alpha=0.6)
     ax2.set_ylabel('Portfolio Value (USD)', fontsize=12, color='darkgreen')
     ax2.tick_params(axis='y', labelcolor='darkgreen')
     
@@ -124,12 +114,12 @@ if __name__ == "__main__":
         print(f"Period: {START_DATE} to {END_DATE}")
         print("-" * 35)
         print(f"Initial Capital:       ${INITIAL_CAPITAL:,.2f}")
-        print(f"Final Portfolio Value: ${strategy_val:,.2f}")
-        print(f"Total Return:          {strategy_ret:.2f}%")
+        print(f"Final Portfolio Value: ${float(strategy_val):,.2f}")
+        print(f"Total Return:          {float(strategy_ret):.2f}%")
         print("-" * 35)
         print("Benchmark: Buy and Hold")
-        print(f"Final Portfolio Value: ${bnh_val:,.2f}")
-        print(f"Total Return:          {bnh_ret:.2f}%")
+        print(f"Final Portfolio Value: ${float(bnh_val):,.2f}")
+        print(f"Total Return:          {float(bnh_ret):.2f}%")
         print("-" * 35)
 
         plot_results(results_df, TICKER, SHORT_SMA, LONG_SMA)
